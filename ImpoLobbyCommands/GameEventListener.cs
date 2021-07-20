@@ -56,7 +56,6 @@ namespace Impostor.Plugins.LobbyCommands.Handlers
             hnsoptions.KillCooldown = 10f;
             hnsoptions.NumEmergencyMeetings = 0;
             hnsoptions.NumImpostors = 1;
-            //hnsoptions.MaxPlayers = 10;
             hnsoptions.EmergencyCooldown = 0;
             hnsoptions.ConfirmImpostor = true;
             hnsoptions.VisualTasks = true;
@@ -86,26 +85,6 @@ namespace Impostor.Plugins.LobbyCommands.Handlers
             _ = savedOptions.Remove(e.Game);
             _ = mode.Remove(e.Game);
             _logger.LogInformation($"Game with code {e.Game.Code} was destroyed");
-        }
-
-        [EventListener]
-        public void OnGameStarted(IGameStartedEvent e)
-        {
-            //_logger.LogInformation("Game is starting.");
-            if (mode[e.Game] == Gamemode.hns)
-            {
-                foreach (var player in e.Game.Players)
-                {
-                    if (player.Character.PlayerInfo.IsImpostor)
-                    {
-                        player.Character.SetColorAsync(Api.Innersloth.Customization.ColorType.Red);
-                    }
-                    else
-                    {
-                        player.Character.SetColorAsync(Api.Innersloth.Customization.ColorType.Blue);
-                    }
-                }
-            }
         }
 
         [EventListener]
@@ -386,7 +365,6 @@ namespace Impostor.Plugins.LobbyCommands.Handlers
             dest.KillDistance = source.KillDistance;
             dest.KillCooldown = source.KillCooldown;
             dest.PlayerSpeedMod = source.PlayerSpeedMod;
-            //options.MaxPlayers = toload.MaxPlayers;
             dest.ConfirmImpostor = source.ConfirmImpostor;
             dest.NumImpostors = source.NumImpostors;
             dest.NumCommonTasks = source.NumCommonTasks;
