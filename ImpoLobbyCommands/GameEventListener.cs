@@ -1,12 +1,15 @@
-﻿using Impostor.Api.Events;
+using System;
+using System.Linq;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Impostor.Api.Net;
+using Impostor.Api.Events;
 using Impostor.Api.Events.Player;
 using Impostor.Api.Games;
 using Impostor.Api.Innersloth;
 using Impostor.Api.Net.Inner.Objects;
+using Impostor.Api.Innersloth.Customization;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
 
 namespace Impostor.Plugins.LobbyCommands.Handlers
 {
@@ -18,12 +21,15 @@ namespace Impostor.Plugins.LobbyCommands.Handlers
     class GameEventListener : IEventListener
     {
         private readonly ILogger<LobbyCommandsPlugin> _logger;
+        private readonly string[] _mapNames = Enum.GetNames(typeof(MapTypes));
         private Dictionary<string, Api.Innersloth.Customization.ColorType> colors = new Dictionary<string, Api.Innersloth.Customization.ColorType>();
         private Dictionary<string, Api.Innersloth.Customization.HatType> hats = new Dictionary<string, Api.Innersloth.Customization.HatType>();
         private Dictionary<string, Api.Innersloth.Customization.SkinType> skins = new Dictionary<string, Api.Innersloth.Customization.SkinType>();
         private Dictionary<string, Api.Innersloth.Customization.PetType> pets = new Dictionary<string, Api.Innersloth.Customization.PetType>();
         private Dictionary<IGame, Gamemode> mode = new Dictionary<IGame, Gamemode>();
         private Dictionary<IGame, Dictionary<Gamemode, GameOptionsData>> savedOptions = new Dictionary<IGame, Dictionary<Gamemode, GameOptionsData>>();
+        private readonly Random _random = new Random();
+
         public GameEventListener(ILogger<LobbyCommandsPlugin> logger)
         {
             _logger = logger;
@@ -47,25 +53,25 @@ namespace Impostor.Plugins.LobbyCommands.Handlers
 
         private static GameOptionsData GetHnsOptions()
         {
-            GameOptionsData hnsoptions = new GameOptionsData();
-            hnsoptions.ImpostorLightMod = 0.25f;
-            hnsoptions.CrewLightMod = 0.75f;
-            hnsoptions.KillDistance = KillDistances.Short;
-            hnsoptions.DiscussionTime = 0;
-            hnsoptions.VotingTime = 1;
-            hnsoptions.KillCooldown = 10f;
-            hnsoptions.NumEmergencyMeetings = 0;
-            hnsoptions.NumImpostors = 1;
-            hnsoptions.EmergencyCooldown = 0;
-            hnsoptions.ConfirmImpostor = true;
-            hnsoptions.VisualTasks = true;
-            hnsoptions.AnonymousVotes = true;
-            hnsoptions.NumCommonTasks = 0;
-            hnsoptions.NumShortTasks = 3;
-            hnsoptions.NumLongTasks = 1;
-            hnsoptions.PlayerSpeedMod = 1f;
-            hnsoptions.TaskBarUpdate = TaskBarUpdate.Always;
-            return hnsoptions;
+            GameOptionsData hnsOptions = new GameOptionsData();
+            hnsOptions.ImpostorLightMod = 0.25f;
+            hnsOptions.CrewLightMod = 0.75f;
+            hnsOptions.KillDistance = KillDistances.Short;
+            hnsOptions.DiscussionTime = 0;
+            hnsOptions.VotingTime = 1;
+            hnsOptions.KillCooldown = 10f;
+            hnsOptions.NumEmergencyMeetings = 0;
+            hnsOptions.NumImpostors = 1;
+            hnsOptions.EmergencyCooldown = 0;
+            hnsOptions.ConfirmImpostor = true;
+            hnsOptions.VisualTasks = false;
+            hnsOptions.AnonymousVotes = true;
+            hnsOptions.NumCommonTasks = 0;
+            hnsOptions.NumShortTasks = 4;
+            hnsOptions.NumLongTasks = 0;
+            hnsOptions.PlayerSpeedMod = 1.5f;
+            hnsOptions.TaskBarUpdate = TaskBarUpdate.Always;
+            return hnsOptions;
         }
 
         [EventListener]
@@ -88,6 +94,26 @@ namespace Impostor.Plugins.LobbyCommands.Handlers
         }
 
         [EventListener]
+        public void OnGameStarted(IGameStartedEvent e)
+        {
+            //_logger.LogInformation("Game is starting.");
+            if (mode[e.Game] == Gamemode.hns)
+            {
+                foreach (var player in e.Game.Players)
+                {
+                    if (player.Character.PlayerInfo.IsImpostor)
+                    {
+                        player.Character.SetColorAsync(Api.Innersloth.Customization.ColorType.Red);
+                    }
+                    else
+                    {
+                        player.Character.SetColorAsync(Api.Innersloth.Customization.ColorType.Lime);
+                    }
+                }
+            }
+        }
+
+        [EventListener]
         public void OnGameEnded(IGameEndedEvent e)
         {
             //_logger.LogInformation("Game has ended.");
@@ -96,247 +122,122 @@ namespace Impostor.Plugins.LobbyCommands.Handlers
         [EventListener]
         public async ValueTask OnPlayerChat(IPlayerChatEvent e)
         {
-            if (e.Game.GameState == GameStates.NotStarted)
+
+            if (e.Game.GameState != GameStates.NotStarted || !e.Message.StartsWith("/") || !e.ClientPlayer.IsHost)
+                return;
+
+            string[] parts = e.Message.ToLowerInvariant()[1..].Split(" ");
+
+            switch (parts[0])
             {
-                if (e.ClientPlayer.IsHost)
-                {
-                    if (e.Message.StartsWith("/help"))
+                case "help":
+                    await ServerSendChatAsync("Commands list: /map, /gamemode, /killcd, /vision", e.ClientPlayer.Character);
+                    return;
+                case "map":
+                    if (parts.Length == 1)
                     {
-                        await ServerSendChatAsync("Commands list: /map, /impostors, /killcd, /disctime, /votetime, /speed, /color, /name, /hat, /skin, /pet", e.ClientPlayer.Character);
+                        await ServerSendChatAsync($"Available Maps: {string.Join(", ", _mapNames)}", e.ClientPlayer.Character);
+                        return;
+                    }
 
-                    }
-                    if (e.Message.StartsWith("/map "))
+                    if (!_mapNames.Any(name => name.ToLowerInvariant() == parts[1]))
                     {
-                        switch (e.Message.ToLowerInvariant()[5..])
-                        {
-                            case "the skeld":
-                            case "skeld":
-                                if (e.Game.Options.Map == MapTypes.Skeld)
-                                {
-                                    await ServerSendChatAsync("Map is already The Skeld!", e.ClientPlayer.Character, true);
-                                }
-                                else
-                                {
-                                    e.Game.Options.Map = MapTypes.Skeld;
-                                    await e.Game.SyncSettingsAsync();
-                                    await ServerSendChatAsync("Map changed to The Skeld", e.ClientPlayer.Character);
-                                }
-                                break;
-                            case "mira":
-                            case "mirahq":
-                            case "mira hq":
-                                if (e.Game.Options.Map == MapTypes.MiraHQ)
-                                {
-                                    await ServerSendChatAsync("Map is already MiraHQ!", e.ClientPlayer.Character, true);
-                                }
-                                else
-                                {
-                                    e.Game.Options.Map = MapTypes.MiraHQ;
-                                    await e.Game.SyncSettingsAsync();
-                                    await ServerSendChatAsync("Map changed to MiraHQ", e.ClientPlayer.Character);
-                                }
-                                break;
-                            case "polus":
-                                if (e.Game.Options.Map == MapTypes.Polus)
-                                {
-                                    await ServerSendChatAsync("Map is already Polus!", e.ClientPlayer.Character, true);
-                                }
-                                else
-                                {
-                                    e.Game.Options.Map = MapTypes.Polus;
-                                    await e.Game.SyncSettingsAsync();
-                                    await ServerSendChatAsync("Map changed to Polus", e.ClientPlayer.Character);
-                                }
-                                break;
-                            default:
-                                await ServerSendChatAsync($"Unrecognized map name \"{e.Message[5..]}\"", e.ClientPlayer.Character, true);
-                                break;
-                        }
+                        await ServerSendChatAsync($"Unknown map. Available Maps: {string.Join(", ", _mapNames)}", e.ClientPlayer.Character);
+                        return;
+                    }
 
-                    }
-                    if (e.Message.StartsWith("/impostors "))
+                    MapTypes map = Enum.Parse<MapTypes>(parts[1], true);
+
+                    await ServerSendChatAsync($"Setting map to {map}", e.ClientPlayer.Character);
+
+                    e.Game.Options.Map = map;
+                    await e.Game.SyncSettingsAsync();
+                    break;
+                case "gamemode":
+                    if (parts.Length == 1)
                     {
-                        int num;
-                        string param = e.Message[11..];
-                        if (!int.TryParse(param, out num))
-                        {
-                            await ServerSendChatAsync("Invalid input: expected a number", e.ClientPlayer.Character, true);
-                        }
-                        else
-                        {
-                            e.Game.Options.NumImpostors = num;
-                            await e.Game.SyncSettingsAsync();
-                            await ServerSendChatAsync("Impostor count set to " + param, e.ClientPlayer.Character);
-                        }
+                        await ServerSendChatAsync($"Current Game Mode: {mode[e.Game]}", e.ClientPlayer.Character);
+                        await ServerSendChatAsync($"(Available Modes: Normal, HideNSeek)", e.ClientPlayer.Character);
+                        return;
                     }
-                    if (e.Message.StartsWith("/killcd "))
+                    if (parts.Length == 2)
                     {
-                        float num;
-                        string param = e.Message[8..];
-                        if (!float.TryParse(param, out num))
-                        {
-                            await ServerSendChatAsync("Invalid input: expected a number", e.ClientPlayer.Character, true);
-                        }
-                        else
-                        {
-                            e.Game.Options.KillCooldown = num;
-                            await e.Game.SyncSettingsAsync();
-                            await ServerSendChatAsync("Kill cooldown set to " + param, e.ClientPlayer.Character);
-                        }
-                    }
-                    if (e.Message.StartsWith("/disctime "))
-                    {
-                        int num;
-                        string param = e.Message[10..];
-                        if (!int.TryParse(param, out num))
-                        {
-                            await ServerSendChatAsync("Invalid input: expected a number", e.ClientPlayer.Character, true);
-                        }
-                        else
-                        {
-                            e.Game.Options.DiscussionTime = num;
-                            await e.Game.SyncSettingsAsync();
-                            await ServerSendChatAsync("Discussion time set to " + param, e.ClientPlayer.Character);
-                        }
-                    }
-                    if (e.Message.StartsWith("/votetime "))
-                    {
-                        int num;
-                        string param = e.Message[10..];
-                        if (!int.TryParse(param, out num))
-                        {
-                            await ServerSendChatAsync("Invalid input: expected a number", e.ClientPlayer.Character, true);
-                        }
-                        else
-                        {
-                            e.Game.Options.VotingTime = num;
-                            await e.Game.SyncSettingsAsync();
-                            await ServerSendChatAsync("Voting time set to " + param, e.ClientPlayer.Character);
-                        }
-                    }
-                    if (e.Message.StartsWith("/speed "))
-                    {
-                        float num;
-                        string param = e.Message[7..];
-                        if (!float.TryParse(param, out num))
-                        {
-                            await ServerSendChatAsync("Invalid input: expected a number", e.ClientPlayer.Character, true);
-                        }
-                        else
-                        {
-                            e.Game.Options.PlayerSpeedMod = num;
-                            await e.Game.SyncSettingsAsync();
-                            await ServerSendChatAsync("Player speed set to " + param, e.ClientPlayer.Character);
-                        }
-                    }
-                    if (e.Message.StartsWith("/gamemode "))
-                    {
-                        string param = e.Message[10..];
-                        switch (param)
+                        switch (parts[1])
                         {
                             case "standard":
+                            case "normal":
                                 if (mode[e.Game] != Gamemode.standard)
                                 {
-                                    //save options
-                                    loadOptions(savedOptions[e.Game][mode[e.Game]], e.Game.Options);
-                                    //load options
-                                    mode[e.Game] = Gamemode.standard;
+                                    loadOptions(savedOptions[e.Game][mode[e.Game]], e.Game.Options); //save options
+                                    mode[e.Game] = Gamemode.standard; //load options
                                     loadOptions(e.Game.Options, savedOptions[e.Game][mode[e.Game]]);
                                     await e.Game.SyncSettingsAsync();
-                                    await ServerSendChatAsync("Gamemode set to standard!", e.ClientPlayer.Character);
+                                    await ServerSendChatAsync("Setting game mode to Normal", e.ClientPlayer.Character);
                                 }
-                                else
-                                {
-                                    await ServerSendChatAsync("Gamemode is already standard!", e.ClientPlayer.Character, true);
-                                }
-                                break;
+                                return;
                             case "hns":
+                            case "hidenseek":
+                            case "hideandseek":
                                 if (mode[e.Game] != Gamemode.hns)
                                 {
-                                    //save options
-                                    loadOptions(savedOptions[e.Game][mode[e.Game]], e.Game.Options);
-                                    //load options
-                                    mode[e.Game] = Gamemode.hns;
+                                    loadOptions(savedOptions[e.Game][mode[e.Game]], e.Game.Options); //save options
+                                    mode[e.Game] = Gamemode.hns; //load options
                                     loadOptions(e.Game.Options, savedOptions[e.Game][mode[e.Game]]);
                                     await e.Game.SyncSettingsAsync();
-                                    await ServerSendChatAsync("Gamemode set to hide and seek!", e.ClientPlayer.Character);
+                                    await ServerSendChatAsync("Setting game mode to HideNSeek", e.ClientPlayer.Character);
                                 }
-                                else
-                                {
-                                    await ServerSendChatAsync("Gamemode is already hide and seek!", e.ClientPlayer.Character, true);
-                                }
-                                break;
-                            default:
-                                await ServerSendChatAsync($"Invalid gamemode \"{param}\"", e.ClientPlayer.Character, true);
-                                break;
+                                return;
                         }
                     }
-                }
-                if (!e.ClientPlayer.IsHost)
-                {
-                    if (e.Message.StartsWith("/help"))
+
+                    await ServerSendChatAsync($"Invalid command. Expecting: '/gamemode {{normal|hns}}'", e.ClientPlayer.Character);
+                    break;
+                case "killcd":
+                    if (parts.Length == 2)
                     {
-                        await ServerSendChatAsync("Commands list: /color, /name, /hat, /skin, /pet", e.ClientPlayer.Character);
+                        if (float.TryParse(parts[1], out float killCooldownNum))
+                        {
+                            e.Game.Options.KillCooldown = killCooldownNum;
+                            await e.Game.SyncSettingsAsync();
+                            await ServerSendChatAsync($"Setting kill cooldown to {killCooldownNum}", e.ClientPlayer.Character);
+                            break;
+                        }
                     }
-                }
-                //Commands common for host & non host
-                if (e.Message.StartsWith("/color "))
-                {
-                    string param = e.Message.ToLowerInvariant()[7..];
-                    if (colors.ContainsKey(param))
+
+                    await ServerSendChatAsync($"Invalid command. Expecting: '/killcd VALUE'", e.ClientPlayer.Character);
+                    break;
+                case "vision":
+                    if (parts.Length == 3)
                     {
-                        await e.ClientPlayer.Character.SetColorAsync(colors[param]);
-                        await ServerSendChatAsync($"Color changed to {e.Message[7..]}", e.ClientPlayer.Character, true);
+                        if (float.TryParse(parts[2], out float visionNum))
+                        {
+                            switch (parts[1])
+                            {
+                                case "imp":
+                                case "impostor":
+                                case "impostors":
+                                case "imposter":
+                                case "imposters":
+                                    e.Game.Options.ImpostorLightMod = visionNum;
+                                    await e.Game.SyncSettingsAsync();
+                                    await ServerSendChatAsync($"Setting vision for Impostors to {visionNum}", e.ClientPlayer.Character);
+                                    return;
+                                case "crew":
+                                case "crewmate":
+                                case "crewmates":
+                                    e.Game.Options.CrewLightMod = visionNum;
+                                    await e.Game.SyncSettingsAsync();
+                                    await ServerSendChatAsync($"Setting vision for Crewmates to {visionNum}", e.ClientPlayer.Character);
+                                    return;
+                            }
+                        }
                     }
-                    else
-                    {
-                        await ServerSendChatAsync($"Invalid color \"{e.Message[7..]}\"", e.ClientPlayer.Character, true);
-                    }
-                }
-                if (e.Message.StartsWith("/name "))
-                {
-                    await e.ClientPlayer.Character.SetNameAsync(e.Message[6..]);
-                    await ServerSendChatAsync($"Name changed to \"{e.Message[6..]}\"", e.ClientPlayer.Character, true);
-                }
-                if (e.Message.StartsWith("/hat "))
-                {
-                    string param = e.Message.ToLowerInvariant()[5..];
-                    if (hats.ContainsKey(param))
-                    {
-                        await e.ClientPlayer.Character.SetHatAsync(hats[param]);
-                        await ServerSendChatAsync($"Hat changed to {e.Message[5..]}", e.ClientPlayer.Character, true);
-                    }
-                    else
-                    {
-                        await ServerSendChatAsync($"Invalid hat \"{e.Message[5..]}\"", e.ClientPlayer.Character, true);
-                    }
-                }
-                if (e.Message.StartsWith("/skin "))
-                {
-                    string param = e.Message.ToLowerInvariant()[6..];
-                    if (skins.ContainsKey(param))
-                    {
-                        await e.ClientPlayer.Character.SetSkinAsync(skins[param]);
-                        await ServerSendChatAsync($"Skin changed to {e.Message[6..]}", e.ClientPlayer.Character, true);
-                    }
-                    else
-                    {
-                        await ServerSendChatAsync($"Invalid skin \"{e.Message[6..]}\"", e.ClientPlayer.Character, true);
-                    }
-                }
-                if (e.Message.StartsWith("/pet "))
-                {
-                    string param = e.Message.ToLowerInvariant()[5..];
-                    if (pets.ContainsKey(param))
-                    {
-                        await e.ClientPlayer.Character.SetPetAsync(pets[param]);
-                        await ServerSendChatAsync($"Pet changed to {e.Message[5..]}", e.ClientPlayer.Character, true);
-                    }
-                    else
-                    {
-                        await ServerSendChatAsync($"Invalid pet \"{e.Message[5..]}\"", e.ClientPlayer.Character, true);
-                    }
-                }
+
+                    await ServerSendChatAsync($"Invalid command. Expecting: '/vision {{impostor|crewmate}} VALUE'", e.ClientPlayer.Character);
+                    break;
+                default:
+                    _logger.LogInformation($"Unknown command {parts[0]} from {e.PlayerControl.PlayerInfo.PlayerName} on {e.Game.Code.Code}.");
+                    break;
             }
         }
 
